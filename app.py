@@ -97,7 +97,7 @@ def translate_text(text_to_translate, target_language="English"):
 
 # --- Main Application Logic ---
 st.title("🇬🇭 Woezɔr — Eʋegbe AI Kpeɖeŋutɔ") # Updated title
-st.caption("W- Wise • O- Open • E- Eloquent • Z- Zealous • O- Omni-competent • R- Resourceful") # <-- UPDATED ACRONYM
+st.caption("W- Wise • O- Open • E- Eloquent • Z- Zealous • O- Omni-competent • R- Resourceful")
 st.caption("From WAIT ❤")
 st.info("Àte ŋu aŋlɔ wò nyawo ɖe Eʋegbe alo Eŋlisigbe me.")
 
@@ -147,11 +147,11 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
             text_reply = ""
             try:
                 # Updated system prompt to reflect Ewe as primary language and new name
-                system_prompt = "You are Woezɔr, a friendly, patient, and knowledgeable AI assistant from WAIT mfiridwuma ho nimdeɛ. Your purpose is to be a general-purpose helper. You can answer questions on a wide variety of topics, explain complex subjects, summarize text, help with creative tasks like writing poems or stories, and engage in general conversation. Your primary language is Ewe. You MUST ALWAYS reply in Ewe, regardless of the user's language (English or Ewe). Understand the user's input and provide a helpful, relevant response in Ewe. To make the conversation more engaging and helpful, ask a relevant follow-up question after your main answer when it feels natural to continue the dialogue. For longer answers, use formatting like lists to make it clear. Be concise and emulate the user's conversational style. If you do not know the answer, politely say 'Taflatse, nyemenya o'. Decline any requests that are harmful or unethical."
+                system_prompt = "You are Woezɔr, a friendly, patient, and knowledgeable AI assistant from WAIT mfiridwuma ho nimdeɛ. Your purpose is to be a general-purpose helper. You can answer questions on a wide variety of topics, explain complex subjects, summarize text, help with creative tasks like writing poems or stories, and engage in general conversation. Your primary language is Ewe. You MUST ALWAYS reply in Ewe, regardless of the user's language (English or Ewe). Understand the user's input and provide a helpful, relevant response in Ewe. To make the conversation more engaging and helpful, ask a relevant follow-up question after your main answer when it feels natural to continue the dialogue. For longer answers, use formatting like lists to make it clear. Keep your answers very short and to the point, often just one or two sentences. Emulate the user's conversational style. If you do not know the answer, politely say 'Taflatse, nyemenya o'. Decline any requests that are harmful or unethical."
                 
                 gemini_messages = [{"role": ("model" if m["role"] == "assistant" else "user"), "parts": [{"text": m["content"]}]} for m in st.session_state.messages]
 
-                payload = {"contents": gemini_messages, "system_instruction": {"parts": [{"text": system_prompt}]}, "generationConfig": {"temperature": 0.4, "maxOutputTokens": 400}}
+                payload = {"contents": gemini_messages, "system_instruction": {"parts": [{"text": system_prompt}]}, "generationConfig": {"temperature": 0.4, "maxOutputTokens": 150}} # <-- REDUCED MAX TOKENS
                 api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
                 res = requests.post(api_url, headers={"Content-Type": "application/json"}, data=json.dumps(payload))
                 res.raise_for_status()
