@@ -6,26 +6,28 @@
 import streamlit as st
 import requests
 import json
-from gradio_client import Client
+from gradio_client import Client, handle_file
 import os
 import logging
 from PIL import Image
+import tempfile
+from streamlit_mic_recorder import mic_recorder
 
 # --- Configuration ---
 GEMINI_API_KEY = "AIzaSyDpAmrLDJjDTKi7TD-IS3vqQlBAYVrUbv4" # <-- IMPORTANT: REPLACE THIS
 MODEL_NAME = "gemini-2.0-flash"
-# This might need to be adjusted if a specific Ewe TTS model is available.
-# For now, keeping the general Ghana-NLP model but specifying Ewe language in prediction.
-TTS_MODEL = "Ghana-NLP/Southern-Ghana-TTS-Public" # Assuming this model can handle Ewe with proper language parameter
+TTS_MODEL = "Ghana-NLP/Southern-Ghana-TTS-Public"
+STT_MODEL = "DarliAI/Evaluation" # <-- Using the specialized DarliAI model for Ewe
 
 # Configure logging to show technical errors in the console (for the developer)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 # --- Ewe Error Messages for the User ---
-# NOTE: These are best-effort translations for Ewe.
 EWE_ERRORS = {
     "TTS_CONNECTION_FAILED": "Taflatse, nyemete ŋu le gbeŋɔŋlɔ̃mɔ̃a gbɔ tu ge fifia o. Meɖe kuku, te ekpɔ emegbe.",
+    "STT_CONNECTION_FAILED": "Taflatse, nyemete ŋu le gbe semɔ̃a gbɔ tu ge fifia o.",
+    "TRANSCRIPTION_FAILED": "Taflatse, nyemete ŋu se nya si gblɔm nèle o. Gbugbɔe gblɔ mesɔ.",
     "GEMINI_API_FAILED": "Taflatse, nye nuŋlɔ̃mɔ̃a medɔwɔ nyuie o. Meɖe kuku, te ekpɔ.",
     "AUDIO_GENERATION_FAILED": "Kuxi aɖe do mo le gbea wɔwɔ me. Nyemete ŋu wɔe nyuie o.",
     "INVALID_AUDIO_PATH": "Gbeŋɔŋlɔ̃mɔ̃a tsɔ mɔ si mesɔ o ɖo ɖem. Nyemete ŋu xɔ gbea o.",
@@ -35,32 +37,22 @@ EWE_ERRORS = {
 
 
 # --- Main App ---
-
-# Load the logo image
 try:
-    logo = Image.open("obpic.png") # Make sure you have a 'obpic.png' file in the same folder
-    st.set_page_config(page_title="Woezɔr EWE", page_icon=logo, layout="centered") # Updated page_title
+    logo = Image.open("obpic.png")
+    st.set_page_config(page_title="Woezɔr EWE", page_icon=logo, layout="centered")
 except FileNotFoundError:
-    # If the logo file is not found, fall back to the emoji
-    st.set_page_config(page_title="Woezɔr EWE", page_icon="🇬🇭", layout="centered") # Updated page_title
+    st.set_page_config(page_title="Woezɔr EWE", page_icon="🇬🇭", layout="centered")
 
 
-# --- CUSTOM CSS FOR SMALLER BUTTONS ---
+# --- CUSTOM CSS ---
 st.markdown("""
 <style>
-    /* Target the button specifically within Streamlit's structure */
     .stButton>button {
         padding: 0.25rem 0.75rem;
         font-size: 0.85rem;
         line-height: 1.5;
         border-radius: 0.5rem;
         min-height: 1rem;
-    }
-    .centered-text {
-        text-align: center;
-        font-size: 1.2rem;
-        margin-top: 20px;
-        margin-bottom: 30px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -69,22 +61,24 @@ st.markdown("""
 # --- Helper Functions ---
 @st.cache_resource
 def init_tts_client():
-    """Initializes the Gradio client, with Ewe error handling."""
-    try:
-        return Client(TTS_MODEL)
+    try: return Client(TTS_MODEL)
     except Exception as e:
-        logging.error(f"Could not connect to the Text-to-Speech model: {e}")
+        logging.error(f"TTS client connection failed: {e}")
         st.error(EWE_ERRORS["TTS_CONNECTION_FAILED"])
         return None
 
+@st.cache_resource
+def init_stt_client():
+    try: return Client(STT_MODEL)
+    except Exception as e:
+        logging.error(f"STT client (DarliAI) connection failed: {e}")
+        st.error(EWE_ERRORS["STT_CONNECTION_FAILED"])
+        return None
+
 def translate_text(text_to_translate, target_language="English"):
-    """Translates text using the Gemini API."""
     try:
         prompt = f"Translate the following Ewe text to {target_language}. Do not add any preamble, just the translation: '{text_to_translate}'"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 400}
-        }
+        payload = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2, "maxOutputTokens": 400}}
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
         res = requests.post(api_url, headers={"Content-Type": "application/json"}, data=json.dumps(payload))
         res.raise_for_status()
@@ -96,15 +90,17 @@ def translate_text(text_to_translate, target_language="English"):
         return EWE_ERRORS["TRANSLATION_FAILED"]
 
 # --- Main Application Logic ---
-st.title("🇬🇭 Woezɔr — Eʋegbe AI Kpeɖeŋutɔ") # Updated title
+st.title("🇬🇭 Woezɔr — Eʋegbe AI Kpeɖeŋutɔ")
 st.caption("W- Wise • O- Open • E- Eloquent • Z- Zealous • O- Omni-competent • R- Resourceful")
 st.caption("From WAIT ❤")
-st.info("Àte ŋu aŋlɔ wò nyawo ɖe Eʋegbe alo Eŋlisigbe me.")
+st.info("Àte ŋu aƒo nu alo aŋlɔ wò nyawo ɖe Eʋegbe alo Eŋlisigbe me.")
 
 tts_client = init_tts_client()
+stt_client = init_stt_client() # Initialize the STT client
+
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Woezɔ, loo! Nye ŋkɔ enye Woezɔr. Aleke mate ŋu akpe ɖe ŋuwò?"} # Ewe greeting, updated name
+        {"role": "assistant", "content": "Woezɔ, loo! Nye ŋkɔ enye Woezɔr. Aleke mate ŋu akpe ɖe ŋuwò?"}
     ]
 
 # --- Display Chat History ---
@@ -115,18 +111,14 @@ for i, msg in enumerate(st.session_state.messages):
             if isinstance(msg["audio"], str) and os.path.isfile(msg["audio"]):
                 st.audio(msg["audio"])
 
-        # --- Translation Toggle Logic (for assistant messages only) ---
-        if msg["role"] == "assistant" and msg["content"] not in EWE_ERRORS.values(): # Use EWE_ERRORS
+        if msg["role"] == "assistant" and msg["content"] not in EWE_ERRORS.values():
             visibility_key = f"translation_visible_{i}"
             if visibility_key not in st.session_state:
                 st.session_state[visibility_key] = False
-
             button_text = "Hide Translation" if st.session_state[visibility_key] else "See Translation"
-
             if st.button(button_text, key=f"translate_btn_{i}"):
                 st.session_state[visibility_key] = not st.session_state[visibility_key]
                 st.rerun()
-
             if st.session_state[visibility_key]:
                 with st.spinner("Translating..."):
                     translation_cache_key = f"translation_text_{i}"
@@ -135,67 +127,96 @@ for i, msg in enumerate(st.session_state.messages):
                     st.info(st.session_state[translation_cache_key])
 
 
-# --- Handle New User Input ---
-if prompt := st.chat_input("Ŋlɔ wò nya ɖe afii..."): # Ewe chat input prompt
+# --- VOICE AND TEXT INPUT SECTION ---
+audio_info = mic_recorder(start_prompt="🎤 ƒo nu (Speak)", stop_prompt="⏹️ Dzudzɔ (Stop)", just_once=True, key='recorder')
+prompt = st.chat_input("Ŋlɔ wò nya ɖe afii...")
+
+# Handle voice input
+if audio_info and audio_info['bytes']:
+    audio_bytes = audio_info['bytes']
+    with st.spinner("Woezɔr le wò gbe sem..."):
+        transcribed_text = ""
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp_audio_file:
+                tmp_audio_file.write(audio_bytes)
+                tmp_audio_filepath = tmp_audio_file.name
+
+            if stt_client:
+                result = stt_client.predict(
+                    audio_path=handle_file(tmp_audio_filepath),
+                    language="Ewe", # <-- Set language to Ewe
+                    api_name="/_transcribe_and_store"
+                )
+                transcribed_text = result if isinstance(result, str) else str(result)
+            
+            os.remove(tmp_audio_filepath)
+
+        except Exception as e:
+            logging.error(f"An unexpected transcription error occurred: {e}")
+            st.error(EWE_ERRORS["TRANSCRIPTION_FAILED"])
+
+        if transcribed_text and transcribed_text.strip():
+            st.session_state.messages.append({"role": "user", "content": transcribed_text})
+            st.rerun()
+
+# Handle text input
+if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.rerun()
 
 # --- Generate and Display AI Response (if last message was from user) ---
 if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
     with st.chat_message("assistant"):
-        with st.spinner("Woezɔr le tame bum..."): # Ewe spinner text, updated name
+        with st.spinner("Woezɔr le tame bum..."):
             text_reply = ""
             try:
-                # Updated system prompt to reflect Ewe as primary language and new name
-                system_prompt = "You are Woezɔr, a friendly, patient, and knowledgeable AI assistant from WAIT mfiridwuma ho nimdeɛ. Your purpose is to be a general-purpose helper. You can answer questions on a wide variety of topics, explain complex subjects, summarize text, help with creative tasks like writing poems or stories, and engage in general conversation. Your primary language is Ewe. You MUST ALWAYS reply in Ewe, regardless of the user's language (English or Ewe). Understand the user's input and provide a helpful, relevant response in Ewe. To make the conversation more engaging and helpful, ask a relevant follow-up question after your main answer when it feels natural to continue the dialogue. For longer answers, use formatting like lists to make it clear. Keep your answers very short and to the point, often just one or two sentences. Emulate the user's conversational style. If you do not know the answer, politely say 'Taflatse, nyemenya o'. Decline any requests that are harmful or unethical."
+                system_prompt = "You are Woezɔr, a friendly, patient, and knowledgeable AI assistant from WAIT mfiridwuma ho nimdeɛ. Your purpose is to be a general-purpose helper. Your primary language is Ewe. You MUST ALWAYS reply in Ewe, regardless of the user's language (English or Ewe). Understand the user's input and provide a helpful, relevant response. Crucial instruction: Your response must be extremely short and concise, ideally one sentence. Never write long paragraphs. If you do not know the answer, politely say 'Taflatse, nyemenya o'. Decline any requests that are harmful or unethical."
                 
                 gemini_messages = [{"role": ("model" if m["role"] == "assistant" else "user"), "parts": [{"text": m["content"]}]} for m in st.session_state.messages]
-
-                payload = {"contents": gemini_messages, "system_instruction": {"parts": [{"text": system_prompt}]}, "generationConfig": {"temperature": 0.4, "maxOutputTokens": 150}} # <-- REDUCED MAX TOKENS
+                
+                payload = {
+                    "contents": gemini_messages,
+                    "system_instruction": {"parts": [{"text": system_prompt}]},
+                    "generationConfig": {"temperature": 0.2, "maxOutputTokens": 80}
+                }
                 api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={GEMINI_API_KEY}"
                 res = requests.post(api_url, headers={"Content-Type": "application/json"}, data=json.dumps(payload))
                 res.raise_for_status()
                 data = res.json()
-                text_reply = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", EWE_ERRORS["GEMINI_API_FAILED"]) # Use EWE_ERRORS
+                text_reply = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", EWE_ERRORS["GEMINI_API_FAILED"])
             except Exception as e:
                 logging.error(f"Gemini API call failed: {e}")
-                text_reply = EWE_ERRORS["GEMINI_API_FAILED"] # Use EWE_ERRORS
+                text_reply = EWE_ERRORS["GEMINI_API_FAILED"]
                 st.error(text_reply)
 
         if text_reply and text_reply != EWE_ERRORS["GEMINI_API_FAILED"]:
              st.markdown(text_reply)
 
-        # 2. Generate audio for the new response
+        # Generate audio for the new response
         audio_path_to_store = None
-        if text_reply and tts_client and text_reply != EWE_ERRORS["GEMINI_API_FAILED"]: # Use EWE_ERRORS
-            with st.spinner("Woezɔr le nu ƒom..."): # Ewe spinner text, updated name
+        if text_reply and tts_client and text_reply != EWE_ERRORS["GEMINI_API_FAILED"]:
+            with st.spinner("Woezɔr le nu ƒom..."):
                 audio_result = None
                 try:
                     filepath_str = None
-                    # IMPORTANT: Set lang to "Ewe" and speaker to a suitable option if available
                     audio_result = tts_client.predict(text=text_reply, lang="Ewe", speaker="Female", api_name="/predict")
-
+                    
                     if isinstance(audio_result, str):
                         filepath_str = audio_result
                     elif isinstance(audio_result, dict) and 'name' in audio_result and isinstance(audio_result['name'], str):
                         filepath_str = audio_result['name']
-
-                    if filepath_str:
-                        if os.path.isfile(filepath_str):
-                            st.audio(filepath_str)
-                            audio_path_to_store = filepath_str
-                        else:
-                            logging.warning(f"Audio generation failed: Path is not a valid file -> '{filepath_str}'")
-                            st.warning(EWE_ERRORS["AUDIO_PATH_NOT_FOUND"]) # Use EWE_ERRORS
+                        
+                    if filepath_str and os.path.isfile(filepath_str):
+                        st.audio(filepath_str)
+                        audio_path_to_store = filepath_str
                     else:
-                        logging.warning(f"Audio generation failed: Could not extract filepath from TTS response. Received: {audio_result}")
-                        st.warning(EWE_ERRORS["INVALID_AUDIO_PATH"]) # Use EWE_ERRORS
+                        logging.warning(f"Audio generation failed: Path is not a valid file -> '{filepath_str}'")
+                        st.warning(EWE_ERRORS["AUDIO_PATH_NOT_FOUND"])
 
                 except Exception as e:
                     logging.error(f"An error occurred during audio generation: {e}")
-                    logging.error(f"The raw data from TTS that caused the error was: {audio_result}")
-                    st.error(EWE_ERRORS["AUDIO_GENERATION_FAILED"]) # Use EWE_ERRORS
+                    st.error(EWE_ERRORS["AUDIO_GENERATION_FAILED"])
 
-        # 3. Add the complete AI response to history
+        # Add the complete AI response to history
         st.session_state.messages.append({"role": "assistant", "content": text_reply, "audio": audio_path_to_store})
         st.rerun()
