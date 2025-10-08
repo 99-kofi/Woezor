@@ -6,18 +6,15 @@
 import streamlit as st
 import requests
 import json
-from gradio_client import Client, handle_file
+from gradio_client import Client
 import os
 import logging
 from PIL import Image
-import tempfile
-from streamlit_mic_recorder import mic_recorder
 
 # --- Configuration ---
 GEMINI_API_KEY = "AIzaSyDpAmrLDJjDTKi7TD-IS3vqQlBAYVrUbv4" # <-- IMPORTANT: REPLACE THIS
 MODEL_NAME = "gemini-2.0-flash"
 TTS_MODEL = "Ghana-NLP/Southern-Ghana-TTS-Public"
-STT_MODEL = "DarliAI/Evaluation" # <-- Using the specialized DarliAI model for Ewe
 
 # Configure logging to show technical errors in the console (for the developer)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,8 +23,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # --- Ewe Error Messages for the User ---
 EWE_ERRORS = {
     "TTS_CONNECTION_FAILED": "Taflatse, nyemete ŋu le gbeŋɔŋlɔ̃mɔ̃a gbɔ tu ge fifia o. Meɖe kuku, te ekpɔ emegbe.",
-    "STT_CONNECTION_FAILED": "Taflatse, nyemete ŋu le gbe semɔ̃a gbɔ tu ge fifia o.",
-    "TRANSCRIPTION_FAILED": "Taflatse, nyemete ŋu se nya si gblɔm nèle o. Gbugbɔe gblɔ mesɔ.",
     "GEMINI_API_FAILED": "Taflatse, nye nuŋlɔ̃mɔ̃a medɔwɔ nyuie o. Meɖe kuku, te ekpɔ.",
     "AUDIO_GENERATION_FAILED": "Kuxi aɖe do mo le gbea wɔwɔ me. Nyemete ŋu wɔe nyuie o.",
     "INVALID_AUDIO_PATH": "Gbeŋɔŋlɔ̃mɔ̃a tsɔ mɔ si mesɔ o ɖo ɖem. Nyemete ŋu xɔ gbea o.",
@@ -53,6 +48,14 @@ st.markdown("""
         line-height: 1.5;
         border-radius: 0.5rem;
         min-height: 1rem;
+        width: 100%; /* Make buttons fill the column */
+    }
+    /* Add some space below each starter group */
+    .stButton {
+        margin-bottom: 5px;
+    }
+    div[data-testid="stVerticalBlock"] > div:has(div.stButton) {
+        margin-bottom: 15px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -65,14 +68,6 @@ def init_tts_client():
     except Exception as e:
         logging.error(f"TTS client connection failed: {e}")
         st.error(EWE_ERRORS["TTS_CONNECTION_FAILED"])
-        return None
-
-@st.cache_resource
-def init_stt_client():
-    try: return Client(STT_MODEL)
-    except Exception as e:
-        logging.error(f"STT client (DarliAI) connection failed: {e}")
-        st.error(EWE_ERRORS["STT_CONNECTION_FAILED"])
         return None
 
 def translate_text(text_to_translate, target_language="English"):
@@ -93,15 +88,46 @@ def translate_text(text_to_translate, target_language="English"):
 st.title("🇬🇭 Woezɔr — Eʋegbe AI Kpeɖeŋutɔ")
 st.caption("W- Wise • O- Open • E- Eloquent • Z- Zealous • O- Omni-competent • R- Resourceful")
 st.caption("From WAIT ❤")
-st.info("Àte ŋu aƒo nu alo aŋlɔ wò nyawo ɖe Eʋegbe alo Eŋlisigbe me.")
+st.info("Àte ŋu aŋlɔ wò nyawo ɖe Eʋegbe alo Eŋlisigbe me.")
 
 tts_client = init_tts_client()
-stt_client = init_stt_client() # Initialize the STT client
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "content": "Woezɔ, loo! Nye ŋkɔ enye Woezɔr. Aleke mate ŋu akpe ɖe ŋuwò?"}
     ]
+
+# --- Function to handle button clicks for conversation starters ---
+def send_starter(starter_text):
+    st.session_state.messages.append({"role": "user", "content": starter_text})
+    st.rerun()
+
+# --- Conversation Starters Section ---
+st.markdown("---")
+st.markdown("<h4 style='text-align: center; color: grey;'>Dze Dɔwɔwɔ Gɔme</h4>", unsafe_allow_html=True)
+
+col1, col2 = st.columns(2)
+with col1:
+    # --- THIS IS THE UPDATED SECTION ---
+    # The English meaning is now a caption, visible on all devices.
+    if st.button("Gblɔ gli aɖe nam"):
+        send_starter("Gblɔ gli aɖe nam")
+    st.caption("Tell me a story")
+
+    if st.button("Aleke yame ƒe nɔnɔme le egbe?"):
+        send_starter("Aleke yame ƒe nɔnɔme le egbe?")
+    st.caption("What is the weather like today?")
+
+with col2:
+    if st.button("Ŋlɔ hakpui aɖe ku ɖe Volta tɔsisi ŋu"):
+        send_starter("Ŋlɔ hakpui aɖe ku ɖe Volta tɔsisi ŋu")
+    st.caption("Write a poem about the Volta River")
+
+    if st.button("Gɔ̃ 'Woezɔ, aleke nèle?' ɖe Eŋlisigbe me"):
+        send_starter("Gɔ̃ 'Woezɔ, aleke nèle?' ɖe Eŋlisigbe me")
+    st.caption("Translate 'Woezɔ, aleke nèle?' to English")
+st.markdown("---")
+
 
 # --- Display Chat History ---
 for i, msg in enumerate(st.session_state.messages):
@@ -127,40 +153,8 @@ for i, msg in enumerate(st.session_state.messages):
                     st.info(st.session_state[translation_cache_key])
 
 
-# --- VOICE AND TEXT INPUT SECTION ---
-audio_info = mic_recorder(start_prompt="🎤 ƒo nu (Speak)", stop_prompt="⏹️ Dzudzɔ (Stop)", just_once=True, key='recorder')
-prompt = st.chat_input("Ŋlɔ wò nya ɖe afii...")
-
-# Handle voice input
-if audio_info and audio_info['bytes']:
-    audio_bytes = audio_info['bytes']
-    with st.spinner("Woezɔr le wò gbe sem..."):
-        transcribed_text = ""
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as tmp_audio_file:
-                tmp_audio_file.write(audio_bytes)
-                tmp_audio_filepath = tmp_audio_file.name
-
-            if stt_client:
-                result = stt_client.predict(
-                    audio_path=handle_file(tmp_audio_filepath),
-                    language="Ewe", # <-- Set language to Ewe
-                    api_name="/_transcribe_and_store"
-                )
-                transcribed_text = result if isinstance(result, str) else str(result)
-            
-            os.remove(tmp_audio_filepath)
-
-        except Exception as e:
-            logging.error(f"An unexpected transcription error occurred: {e}")
-            st.error(EWE_ERRORS["TRANSCRIPTION_FAILED"])
-
-        if transcribed_text and transcribed_text.strip():
-            st.session_state.messages.append({"role": "user", "content": transcribed_text})
-            st.rerun()
-
-# Handle text input
-if prompt:
+# --- Handle New User TEXT Input ---
+if prompt := st.chat_input("Ŋlɔ wò nya ɖe afii..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.rerun()
 
@@ -170,7 +164,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"] == "user"
         with st.spinner("Woezɔr le tame bum..."):
             text_reply = ""
             try:
-                system_prompt = "You are Woezɔr, a friendly, patient, and knowledgeable AI assistant from WAIT mfiridwuma ho nimdeɛ. Your purpose is to be a general-purpose helper. Your primary language is Ewe. You MUST ALWAYS reply in Ewe, regardless of the user's language (English or Ewe). Understand the user's input and provide a helpful, relevant response. Crucial instruction: Your response must be extremely short and concise, ideally one sentence. Never write long paragraphs. If you do not know the answer, politely say 'Taflatse, nyemenya o'. Decline any requests that are harmful or unethical."
+                system_prompt = "You are Woezɔr, a friendly, patient, and knowledgeable AI assistant. Your primary language is Ewe. You MUST ALWAYS reply in Ewe. Understand the user's input (in English or Ewe) and provide a helpful response. Crucial instruction: Your response must be extremely short and concise, ideally one sentence. Never write long paragraphs. If you do not know the answer, politely say 'Taflatse, nyemenya o'. Decline any requests that are harmful or unethical."
                 
                 gemini_messages = [{"role": ("model" if m["role"] == "assistant" else "user"), "parts": [{"text": m["content"]}]} for m in st.session_state.messages]
                 
